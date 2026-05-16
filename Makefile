@@ -8,7 +8,7 @@ DATE     := $(shell date +%Y-%m-%d)
 LDFLAGS  := -s -w -X $(MODULE)/internal/build.Version=$(VERSION) -X $(MODULE)/internal/build.Date=$(DATE)
 PREFIX   ?= /usr/local
 
-.PHONY: all build vet test unit-test integration-test install uninstall clean fetch_meta gitleaks
+.PHONY: all build build-shared-darwin build-shared-linux build-shared-catalog vet test unit-test integration-test python-sdk-smoke install uninstall clean fetch_meta gitleaks
 
 all: test
 
@@ -17,6 +17,17 @@ fetch_meta:
 
 build: fetch_meta
 	go build -trimpath -ldflags "$(LDFLAGS)" -o $(BINARY) .
+
+build-shared-darwin: fetch_meta
+	mkdir -p dist/darwin
+	CGO_ENABLED=1 GOOS=darwin GOARCH=$$(go env GOARCH) go build -trimpath -buildmode=c-shared -ldflags "$(LDFLAGS)" -o dist/darwin/liblarkcli.dylib ./cshared
+
+build-shared-linux: fetch_meta
+	mkdir -p dist/linux
+	CGO_ENABLED=1 GOOS=linux GOARCH=$$(go env GOARCH) go build -trimpath -buildmode=c-shared -ldflags "$(LDFLAGS)" -o dist/linux/liblarkcli.so ./cshared
+
+build-shared-catalog: fetch_meta
+	go run ./tools/dump_command_catalog > python_sdk/lark_cli_sdk/command_catalog.json
 
 vet: fetch_meta
 	go vet ./...
@@ -28,6 +39,17 @@ integration-test: build
 	go test -v -count=1 ./tests/...
 
 test: vet unit-test integration-test
+
+python-sdk-smoke: fetch_meta
+	@set -e; \
+	if [ "$$(uname -s)" = "Darwin" ]; then \
+		$(MAKE) build-shared-darwin; \
+		LIB_PATH=$$(pwd)/dist/darwin/liblarkcli.dylib; \
+	else \
+		$(MAKE) build-shared-linux; \
+		LIB_PATH=$$(pwd)/dist/linux/liblarkcli.so; \
+	fi; \
+	PYTHONPATH=python_sdk LARK_CLI_SHARED_LIB=$$LIB_PATH python3 -m unittest python_sdk/tests/test_client_smoke.py
 
 install: build
 	install -d $(PREFIX)/bin

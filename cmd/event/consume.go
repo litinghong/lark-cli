@@ -185,10 +185,12 @@ func runConsume(cmd *cobra.Command, f *cmdutil.Factory, eventKey string, o consu
 
 	// Non-TTY only: stdin EOF is shutdown for subprocess callers; in TTY Ctrl-D must not exit.
 	if !f.IOStreams.IsTerminal {
-		watchStdinEOF(os.Stdin, cancel, errOut)
+		if in := f.IOStreams.In; in != nil {
+			watchStdinEOF(in, cancel, errOut)
+		}
 	}
 
-	if err := consume.Run(ctx, transport.New(), cfg.AppID, cfg.ProfileName, domain, consume.Options{
+	if err := consume.Run(ctx, transport.New(), cfg.AppID, cfg.AppSecret, cfg.ProfileName, domain, consume.Options{
 		EventKey:        eventKey,
 		Params:          paramMap,
 		JQExpr:          o.jqExpr,

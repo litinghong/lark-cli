@@ -14,10 +14,12 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"sync"
 	"time"
 
 	"github.com/larksuite/cli/internal/core"
 	"github.com/larksuite/cli/internal/event"
+	"github.com/larksuite/cli/internal/event/bus"
 	"github.com/larksuite/cli/internal/event/protocol"
 	"github.com/larksuite/cli/internal/event/transport"
 	"github.com/larksuite/cli/internal/lockfile"
@@ -29,9 +31,41 @@ const (
 	dialTimeout       = 3 * time.Second
 )
 
+var (
+	embeddedBusModeEnabled bool
+	embeddedBusModeMu      sync.RWMutex
+	embeddedBusMu          sync.Mutex
+	embeddedBusByApp       = map[string]*embeddedBusHandle{}
+)
+
+type embeddedBusHandle struct {
+	cancel context.CancelFunc
+	done   chan struct{}
+}
+
+// SetEmbeddedBusMode toggles in-process event bus startup for library callers.
+// Returns a restore function that puts the previous value back.
+func SetEmbeddedBusMode(enabled bool) func() {
+	embeddedBusModeMu.Lock()
+	prev := embeddedBusModeEnabled
+	embeddedBusModeEnabled = enabled
+	embeddedBusModeMu.Unlock()
+	return func() {
+		embeddedBusModeMu.Lock()
+		embeddedBusModeEnabled = prev
+		embeddedBusModeMu.Unlock()
+	}
+}
+
+func isEmbeddedBusModeEnabled() bool {
+	embeddedBusModeMu.RLock()
+	defer embeddedBusModeMu.RUnlock()
+	return embeddedBusModeEnabled
+}
+
 // EnsureBus dials the bus daemon for appID, forking a new one if none is running.
 // apiClient nil skips remote-connection probe. Local-bus hits skip remote check (see `event status`).
-func EnsureBus(ctx context.Context, tr transport.IPC, appID, profileName, domain string, apiClient APIClient, errOut io.Writer) (net.Conn, error) {
+func EnsureBus(ctx context.Context, tr transport.IPC, appID, appSecret, profileName, domain string, apiClient APIClient, errOut io.Writer) (net.Conn, error) {
 	if errOut == nil {
 		errOut = os.Stderr //nolint:forbidigo // library-caller fallback
 	}
@@ -62,7 +96,7 @@ func EnsureBus(ctx context.Context, tr transport.IPC, appID, profileName, domain
 	}
 
 	// ErrHeld = another consume is forking; let dial retry catch its bus.
-	pid, forkErr := forkBus(tr, appID, profileName, domain)
+	pid, forkErr := forkBus(tr, appID, appSecret, profileName, domain)
 	if forkErr != nil && !errors.Is(forkErr, lockfile.ErrHeld) {
 		eventsRoot := filepath.Join(core.GetConfigDir(), "events")
 		return nil, fmt.Errorf("failed to start event bus daemon: %w\n"+
@@ -120,7 +154,7 @@ func probeAndDialBus(tr transport.IPC, addr string) (net.Conn, error) {
 }
 
 // forkBus holds bus.fork.lock until the spawned daemon is dial-able, so concurrent callers can't race past the empty-socket gap and fork independent buses.
-func forkBus(tr transport.IPC, appID, profileName, domain string) (int, error) {
+func forkBus(tr transport.IPC, appID, appSecret, profileName, domain string) (int, error) {
 	lockPath := filepath.Join(core.GetConfigDir(), "events", event.SanitizeAppID(appID), "bus.fork.lock")
 	if err := vfs.MkdirAll(filepath.Dir(lockPath), 0700); err != nil {
 		return 0, err
@@ -131,6 +165,10 @@ func forkBus(tr transport.IPC, appID, profileName, domain string) (int, error) {
 		return 0, err
 	}
 	defer lock.Unlock()
+
+	if isEmbeddedBusModeEnabled() {
+		return ensureEmbeddedBus(tr, appID, appSecret, domain)
+	}
 
 	exe, err := os.Executable()
 	if err != nil {
@@ -158,6 +196,53 @@ func forkBus(tr transport.IPC, appID, profileName, domain string) (int, error) {
 		time.Sleep(dialRetryInterval)
 	}
 	return cmd.Process.Pid, fmt.Errorf("bus did not become ready within %v", dialTimeout)
+}
+
+func ensureEmbeddedBus(tr transport.IPC, appID, appSecret, domain string) (int, error) {
+	addr := tr.Address(appID)
+	embeddedBusMu.Lock()
+	defer embeddedBusMu.Unlock()
+
+	if h, ok := embeddedBusByApp[appID]; ok {
+		select {
+		case <-h.done:
+			delete(embeddedBusByApp, appID)
+		default:
+			if conn, err := tr.Dial(addr); err == nil {
+				conn.Close()
+				return os.Getpid(), nil
+			}
+		}
+	}
+
+	eventsDir := filepath.Join(core.GetConfigDir(), "events", event.SanitizeAppID(appID))
+	logger, err := bus.SetupBusLogger(eventsDir)
+	if err != nil {
+		return 0, err
+	}
+	ctx, cancel := context.WithCancel(context.Background())
+	done := make(chan struct{})
+	embeddedBusByApp[appID] = &embeddedBusHandle{cancel: cancel, done: done}
+
+	go func() {
+		defer close(done)
+		b := bus.NewBus(appID, appSecret, domain, tr, logger)
+		_ = b.Run(ctx)
+		embeddedBusMu.Lock()
+		delete(embeddedBusByApp, appID)
+		embeddedBusMu.Unlock()
+	}()
+
+	deadline := time.Now().Add(dialTimeout)
+	for time.Now().Before(deadline) {
+		if conn, dialErr := tr.Dial(addr); dialErr == nil {
+			conn.Close()
+			return os.Getpid(), nil
+		}
+		time.Sleep(dialRetryInterval)
+	}
+	cancel()
+	return 0, fmt.Errorf("embedded bus did not become ready within %v", dialTimeout)
 }
 
 func buildForkArgs(profileName, domain string) []string {

@@ -36,7 +36,7 @@ type Options struct {
 
 // Run ensures bus is up, performs hello handshake, runs PreConsume for first subscriber,
 // enters the consume loop, and runs cleanup on exit if we were the last subscriber.
-func Run(ctx context.Context, tr transport.IPC, appID, profileName, domain string, opts Options) error {
+func Run(ctx context.Context, tr transport.IPC, appID, appSecret, profileName, domain string, opts Options) error {
 	errOut := opts.ErrOut
 	if errOut == nil {
 		errOut = os.Stderr //nolint:forbidigo // library-caller fallback
@@ -72,7 +72,7 @@ func Run(ctx context.Context, tr transport.IPC, appID, profileName, domain strin
 		}
 	}
 
-	conn, err := EnsureBus(ctx, tr, appID, profileName, domain, opts.RemoteAPIClient, errOut)
+	conn, err := EnsureBus(ctx, tr, appID, appSecret, profileName, domain, opts.RemoteAPIClient, errOut)
 	if err != nil {
 		return err
 	}

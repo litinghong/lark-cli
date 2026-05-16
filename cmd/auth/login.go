@@ -16,6 +16,7 @@ import (
 	larkauth "github.com/larksuite/cli/internal/auth"
 	"github.com/larksuite/cli/internal/cmdutil"
 	"github.com/larksuite/cli/internal/core"
+	"github.com/larksuite/cli/internal/credentialfile"
 	"github.com/larksuite/cli/internal/output"
 	"github.com/larksuite/cli/internal/registry"
 	"github.com/larksuite/cli/shortcuts"
@@ -24,15 +25,16 @@ import (
 
 // LoginOptions holds all inputs for auth login.
 type LoginOptions struct {
-	Factory    *cmdutil.Factory
-	Ctx        context.Context
-	JSON       bool
-	Scope      string
-	Recommend  bool
-	Domains    []string
-	Exclude    []string
-	NoWait     bool
-	DeviceCode string
+	Factory          *cmdutil.Factory
+	Ctx              context.Context
+	JSON             bool
+	Scope            string
+	Recommend        bool
+	Domains          []string
+	Exclude          []string
+	NoWait           bool
+	DeviceCode       string
+	NoCredentialFile bool
 }
 
 var pollDeviceToken = larkauth.PollDeviceToken
@@ -73,6 +75,7 @@ browser. Run it in the background and retrieve the verification URL from its out
 	cmd.Flags().BoolVar(&opts.JSON, "json", false, "structured JSON output")
 	cmd.Flags().BoolVar(&opts.NoWait, "no-wait", false, "initiate device authorization and return immediately; use --device-code to complete")
 	cmd.Flags().StringVar(&opts.DeviceCode, "device-code", "", "poll and complete authorization with a device code from a previous --no-wait call")
+	cmd.Flags().BoolVar(&opts.NoCredentialFile, "no-credential-file", false, "do not persist .lark-cli-credentials.json after login succeeds")
 
 	cmdutil.RegisterFlagCompletion(cmd, "domain", func(_ *cobra.Command, _ []string, toComplete string) ([]string, cobra.ShellCompDirective) {
 		return completeDomain(toComplete), cobra.ShellCompDirectiveNoFileComp
@@ -358,6 +361,11 @@ func authLoginRun(opts *LoginOptions) error {
 		_ = larkauth.RemoveStoredToken(config.AppID, openId)
 		return output.Errorf(output.ExitInternal, "internal", "failed to update login profile: %v", err)
 	}
+	if !opts.NoCredentialFile {
+		if err := persistLoginCredentialFile(f, config, openId, userName, storedToken); err != nil {
+			return output.Errorf(output.ExitInternal, "internal", "failed to save credential file: %v", err)
+		}
+	}
 
 	if issue := ensureRequestedScopesGranted(finalScope, result.Token.Scope, msg, scopeSummary); issue != nil {
 		return handleLoginScopeIssue(opts, msg, f, issue, openId, userName)
@@ -440,6 +448,11 @@ func authLoginPollDeviceCode(opts *LoginOptions, config *core.CliConfig, msg *lo
 		_ = larkauth.RemoveStoredToken(config.AppID, openId)
 		return output.Errorf(output.ExitInternal, "internal", "failed to update login profile: %v", err)
 	}
+	if !opts.NoCredentialFile {
+		if err := persistLoginCredentialFile(f, config, openId, userName, storedToken); err != nil {
+			return output.Errorf(output.ExitInternal, "internal", "failed to save credential file: %v", err)
+		}
+	}
 
 	if issue := ensureRequestedScopesGranted(requestedScope, result.Token.Scope, msg, scopeSummary); issue != nil {
 		return handleLoginScopeIssue(opts, msg, f, issue, openId, userName)
@@ -479,6 +492,35 @@ func findProfileByName(multi *core.MultiAppConfig, profileName string) *core.App
 		if multi.Apps[i].ProfileName() == profileName {
 			return &multi.Apps[i]
 		}
+	}
+	return nil
+}
+
+func persistLoginCredentialFile(f *cmdutil.Factory, config *core.CliConfig, openID, userName string, tok *larkauth.StoredUAToken) error {
+	if config == nil || tok == nil {
+		return fmt.Errorf("missing login credential payload")
+	}
+	rec := &credentialfile.Record{
+		AppID:             config.AppID,
+		AppSecret:         config.AppSecret,
+		Brand:             string(config.Brand),
+		DefaultAs:         string(core.AsUser),
+		UserOpenID:        openID,
+		UserName:          userName,
+		UserAccessToken:   tok.AccessToken,
+		RefreshToken:      tok.RefreshToken,
+		ExpiresAt:         tok.ExpiresAt,
+		RefreshExpiresAt:  tok.RefreshExpiresAt,
+		Scope:             tok.Scope,
+		GrantedAt:         tok.GrantedAt,
+		TenantAccessToken: "",
+	}
+	path, usedFallback, err := credentialfile.SaveToPreferredPaths(rec)
+	if err != nil {
+		return err
+	}
+	if usedFallback {
+		fmt.Fprintf(f.IOStreams.ErrOut, "[lark-cli] [WARN] executable directory is not writable, credential file saved to fallback path: %s\n", path)
 	}
 	return nil
 }

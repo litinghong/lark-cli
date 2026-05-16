@@ -19,6 +19,7 @@ import (
 
 	"github.com/gofrs/flock"
 	"github.com/larksuite/cli/internal/core"
+	"github.com/larksuite/cli/internal/credentialfile"
 	"github.com/larksuite/cli/internal/vfs"
 )
 
@@ -306,5 +307,44 @@ func doRefreshToken(httpClient *http.Client, opts UATCallOptions, stored *Stored
 	if err := SetStoredToken(updated); err != nil {
 		return nil, err
 	}
+	if err := persistRefreshedCredentialFile(opts, updated); err != nil {
+		fmt.Fprintf(errOut, "[lark-cli] [WARN] uat-client: failed to update credential file: %v\n", err)
+	}
 	return updated, nil
+}
+
+func persistRefreshedCredentialFile(opts UATCallOptions, tok *StoredUAToken) error {
+	if tok == nil {
+		return fmt.Errorf("token is nil")
+	}
+	rec := &credentialfile.Record{
+		AppID:             opts.AppId,
+		AppSecret:         opts.AppSecret,
+		Brand:             string(opts.Domain),
+		DefaultAs:         string(core.AsUser),
+		UserOpenID:        tok.UserOpenId,
+		UserAccessToken:   tok.AccessToken,
+		RefreshToken:      tok.RefreshToken,
+		ExpiresAt:         tok.ExpiresAt,
+		RefreshExpiresAt:  tok.RefreshExpiresAt,
+		Scope:             tok.Scope,
+		GrantedAt:         tok.GrantedAt,
+		TenantAccessToken: "",
+	}
+	if existing, _, err := credentialfile.LoadFromPreferredPaths(); err == nil && existing != nil {
+		if existing.UserName != "" {
+			rec.UserName = existing.UserName
+		}
+		if existing.DefaultAs != "" {
+			rec.DefaultAs = existing.DefaultAs
+		}
+		if existing.TenantAccessToken != "" {
+			rec.TenantAccessToken = existing.TenantAccessToken
+		}
+		if rec.AppSecret == "" {
+			rec.AppSecret = existing.AppSecret
+		}
+	}
+	_, _, err := credentialfile.SaveToPreferredPaths(rec)
+	return err
 }

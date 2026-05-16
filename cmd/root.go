@@ -14,6 +14,7 @@ import (
 	"os"
 	"strconv"
 
+	extcred "github.com/larksuite/cli/extension/credential"
 	internalauth "github.com/larksuite/cli/internal/auth"
 	"github.com/larksuite/cli/internal/build"
 	"github.com/larksuite/cli/internal/cmdutil"
@@ -58,6 +59,8 @@ FLAGS:
     --jq <expr>           jq expression to filter JSON output
     -q <expr>             shorthand for --jq
     --dry-run             print request without executing
+    --user-credential-json <json>
+                          inline credential payload (snake_case fields)
 
 AI AGENT SKILLS:
     lark-cli pairs with AI agent skills (Claude Code, etc.) that
@@ -212,6 +215,14 @@ func asExitError(err error) *output.ExitError {
 	var cfgErr *core.ConfigError
 	if errors.As(err, &cfgErr) {
 		return output.ErrWithHint(cfgErr.Code, cfgErr.Type, cfgErr.Message, cfgErr.Hint)
+	}
+	var blockErr *extcred.BlockError
+	if errors.As(err, &blockErr) {
+		msg := blockErr.Reason
+		if msg == "" {
+			msg = err.Error()
+		}
+		return output.Errorf(output.ExitValidation, "config", msg)
 	}
 	var exitErr *output.ExitError
 	if errors.As(err, &exitErr) {

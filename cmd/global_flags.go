@@ -13,8 +13,9 @@ import (
 // is a build-time policy — when true, --profile stays parseable but is marked
 // hidden from help and shell completion.
 type GlobalOptions struct {
-	Profile     string
-	HideProfile bool
+	Profile            string
+	UserCredentialJSON string
+	HideProfile        bool
 }
 
 // RegisterGlobalFlags registers the root-level persistent flags on fs and
@@ -22,6 +23,7 @@ type GlobalOptions struct {
 // network, or environment reads — the caller decides HideProfile.
 func RegisterGlobalFlags(fs *pflag.FlagSet, opts *GlobalOptions) {
 	fs.StringVar(&opts.Profile, "profile", "", "use a specific profile")
+	fs.StringVar(&opts.UserCredentialJSON, "user-credential-json", "", "user credential JSON payload")
 	if opts.HideProfile {
 		_ = fs.MarkHidden("profile")
 	}

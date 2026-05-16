@@ -398,12 +398,14 @@ func TestResolveAs_StrictModeBot_IgnoresDefaultAsUser(t *testing.T) {
 
 // stubExtProvider is a minimal extcred.Provider for testing external-provider guards.
 type stubExtProvider struct {
-	name string
-	acct *extcred.Account
-	err  error
+	name    string
+	acct    *extcred.Account
+	err     error
+	builtin bool
 }
 
-func (s *stubExtProvider) Name() string { return s.name }
+func (s *stubExtProvider) Name() string  { return s.name }
+func (s *stubExtProvider) Builtin() bool { return s.builtin }
 func (s *stubExtProvider) ResolveAccount(_ context.Context) (*extcred.Account, error) {
 	return s.acct, s.err
 }
@@ -445,6 +447,16 @@ func TestRequireBuiltinCredentialProvider_AllowsBuiltinProvider(t *testing.T) {
 	f, _, _, _ := TestFactory(t, nil)
 	err := f.RequireBuiltinCredentialProvider(context.Background(), "auth")
 	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+}
+
+func TestRequireBuiltinCredentialProvider_AllowsBuiltinExtensionProvider(t *testing.T) {
+	stub := &stubExtProvider{name: "exe_file", builtin: true, acct: &extcred.Account{AppID: "app"}}
+	cred := credential.NewCredentialProvider([]extcred.Provider{stub}, nil, nil, nil)
+	f, _, _, _ := TestFactory(t, nil)
+	f.Credential = cred
+	if err := f.RequireBuiltinCredentialProvider(context.Background(), "auth"); err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
 }

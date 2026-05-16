@@ -20,10 +20,11 @@ import (
 
 // configInitResult holds the result of the interactive config init flow.
 type configInitResult struct {
-	Mode      string // "create" or "existing"
-	Brand     core.LarkBrand
-	AppID     string
-	AppSecret string
+	Mode       string // "create" or "existing"
+	Brand      core.LarkBrand
+	AppID      string
+	AppSecret  string
+	UserOpenID string
 }
 
 // runInteractiveConfigInit shows an interactive TUI for config init.
@@ -232,5 +233,11 @@ func runCreateAppFlow(ctx context.Context, f *cmdutil.Factory, brandOverride cor
 		Brand:     finalBrand,
 		AppID:     result.ClientID,
 		AppSecret: result.ClientSecret,
+		UserOpenID: func() string {
+			if result.UserInfo == nil {
+				return ""
+			}
+			return result.UserInfo.OpenID
+		}(),
 	}, nil
 }

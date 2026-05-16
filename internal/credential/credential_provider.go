@@ -146,6 +146,10 @@ type CredentialProvider struct {
 	hintErr  error
 }
 
+type builtinMarker interface {
+	Builtin() bool
+}
+
 // NewCredentialProvider creates a CredentialProvider.
 func NewCredentialProvider(providers []extcred.Provider, defaultAcct DefaultAccountResolver, defaultToken DefaultTokenResolver, httpClient func() (*http.Client, error)) *CredentialProvider {
 	return &CredentialProvider{
@@ -347,6 +351,9 @@ func (p *CredentialProvider) ActiveExtensionProviderName(ctx context.Context) (s
 		if err != nil {
 			var blockErr *extcred.BlockError
 			if errors.As(err, &blockErr) {
+				if isBuiltinExtensionProvider(prov) {
+					continue
+				}
 				name := blockErr.Provider
 				if name == "" {
 					name = prov.Name()
@@ -359,6 +366,9 @@ func (p *CredentialProvider) ActiveExtensionProviderName(ctx context.Context) (s
 			return "", err
 		}
 		if acct != nil {
+			if isBuiltinExtensionProvider(prov) {
+				continue
+			}
 			if name := prov.Name(); name != "" {
 				return name, nil
 			}
@@ -366,6 +376,16 @@ func (p *CredentialProvider) ActiveExtensionProviderName(ctx context.Context) (s
 		}
 	}
 	return "", nil
+}
+
+func isBuiltinExtensionProvider(prov extcred.Provider) bool {
+	if prov == nil {
+		return false
+	}
+	if m, ok := prov.(builtinMarker); ok {
+		return m.Builtin()
+	}
+	return false
 }
 
 func convertAccount(ext *extcred.Account) *Account {

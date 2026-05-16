@@ -47,7 +47,7 @@ func TestConfigInitCmd_FlagParsing(t *testing.T) {
 		gotOpts = opts
 		return nil
 	})
-	cmd.SetArgs([]string{"--app-id", "cli_test", "--app-secret-stdin", "--brand", "lark"})
+	cmd.SetArgs([]string{"--app-id", "cli_test", "--app-secret-stdin", "--brand", "lark", "--no-credential-file"})
 	err := cmd.Execute()
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
@@ -60,6 +60,9 @@ func TestConfigInitCmd_FlagParsing(t *testing.T) {
 	}
 	if gotOpts.Brand != "lark" {
 		t.Errorf("expected Brand lark, got %s", gotOpts.Brand)
+	}
+	if !gotOpts.NoCredentialFile {
+		t.Error("expected NoCredentialFile=true")
 	}
 }
 

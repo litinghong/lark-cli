@@ -163,6 +163,7 @@ lark-cli auth status
 | `auth check`  | 校验指定 scope（exit 0 = 有权限，1 = 缺失）      |
 | `auth scopes` | 列出应用的所有可用 scope                         |
 | `auth list`   | 列出所有已认证的用户                             |
+| `auth export` | 导出当前授权凭据 JSON（由 SDK/应用自行管理存储）   |
 
 ```bash
 # 交互式登录（TUI 引导选择业务域和权限级别）
@@ -173,6 +174,12 @@ lark-cli auth login --domain calendar,task
 
 # 推荐的自动审批 scopes
 lark-cli auth login --recommend
+
+# 多用户嵌入场景：跳过本地 .lark-cli-credentials.json 落盘
+lark-cli auth login --recommend --no-credential-file
+
+# 导出当前授权凭据（结构与 .lark-cli-credentials.json 一致）
+lark-cli auth export
 
 # 精确 scope
 lark-cli auth login --scope "calendar:calendar:read"

@@ -25,6 +25,7 @@ type Provider struct{}
 
 func (p *Provider) Name() string  { return "sidecar" }
 func (p *Provider) Priority() int { return 0 }
+func (p *Provider) Builtin() bool { return true }
 
 // ResolveAccount returns a minimal Account when sidecar mode is active.
 // The account contains AppID and Brand from environment variables, a

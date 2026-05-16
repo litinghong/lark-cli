@@ -18,6 +18,7 @@ import (
 	"github.com/larksuite/cli/internal/auth"
 	"github.com/larksuite/cli/internal/cmdutil"
 	"github.com/larksuite/cli/internal/core"
+	"github.com/larksuite/cli/internal/credentialfile"
 	"github.com/larksuite/cli/internal/keychain"
 	"github.com/larksuite/cli/internal/output"
 )
@@ -40,7 +41,8 @@ type ConfigInitOptions struct {
 	// at config bind — which is what AI agents almost always want. Manual
 	// users with a legitimate need for a separate app can pass --force-init
 	// to bypass.
-	ForceInit bool
+	ForceInit        bool
+	NoCredentialFile bool
 }
 
 // NewCmdConfigInit creates the config init subcommand.
@@ -80,6 +82,7 @@ if the user explicitly wants a separate app inside the Agent workspace.`,
 	cmd.Flags().StringVar(&opts.Lang, "lang", "zh", "language for interactive prompts (zh or en)")
 	cmd.Flags().StringVar(&opts.ProfileName, "name", "", "create or update a named profile (append instead of replace)")
 	cmd.Flags().BoolVar(&opts.ForceInit, "force-init", false, "allow init inside an Agent workspace (OPENCLAW_HOME / HERMES_HOME); use config bind instead unless you really want a separate app")
+	cmd.Flags().BoolVar(&opts.NoCredentialFile, "no-credential-file", false, "do not persist .lark-cli-credentials.json during init/create flows")
 
 	return cmd
 }
@@ -323,6 +326,11 @@ func configInitRun(opts *ConfigInitOptions) error {
 		if err := saveInitConfig(opts.ProfileName, existing, f, result.AppID, secret, result.Brand, opts.Lang); err != nil {
 			return output.Errorf(output.ExitInternal, "internal", "failed to save config: %v", err)
 		}
+		if !opts.NoCredentialFile {
+			if err := persistInitCredentialFile(f, result); err != nil {
+				return output.Errorf(output.ExitInternal, "internal", "failed to save credential file: %v", err)
+			}
+		}
 		output.PrintJson(f.IOStreams.Out, map[string]interface{}{"appId": result.AppID, "appSecret": "****", "brand": result.Brand})
 		return nil
 	}
@@ -347,6 +355,11 @@ func configInitRun(opts *ConfigInitOptions) error {
 			}
 			if err := saveInitConfig(opts.ProfileName, existing, f, result.AppID, secret, result.Brand, opts.Lang); err != nil {
 				return output.Errorf(output.ExitInternal, "internal", "failed to save config: %v", err)
+			}
+			if result.Mode == "create" && !opts.NoCredentialFile {
+				if err := persistInitCredentialFile(f, result); err != nil {
+					return output.Errorf(output.ExitInternal, "internal", "failed to save credential file: %v", err)
+				}
 			}
 		} else if result.Mode == "existing" && result.AppID != "" {
 			// Existing app with unchanged secret — update app ID and brand only
@@ -450,5 +463,34 @@ func configInitRun(opts *ConfigInitOptions) error {
 		return output.Errorf(output.ExitInternal, "internal", "failed to save config: %v", err)
 	}
 	output.PrintSuccess(f.IOStreams.ErrOut, fmt.Sprintf("Configuration saved to %s", core.GetConfigPath()))
+	return nil
+}
+
+func persistInitCredentialFile(f *cmdutil.Factory, result *configInitResult) error {
+	if result == nil {
+		return fmt.Errorf("config init result is nil")
+	}
+	rec := &credentialfile.Record{
+		AppID:             result.AppID,
+		AppSecret:         result.AppSecret,
+		Brand:             string(result.Brand),
+		DefaultAs:         string(core.AsBot),
+		UserOpenID:        result.UserOpenID,
+		UserName:          "",
+		UserAccessToken:   "",
+		RefreshToken:      "",
+		ExpiresAt:         0,
+		RefreshExpiresAt:  0,
+		Scope:             "",
+		GrantedAt:         0,
+		TenantAccessToken: "",
+	}
+	path, usedFallback, err := credentialfile.SaveToPreferredPaths(rec)
+	if err != nil {
+		return err
+	}
+	if usedFallback {
+		fmt.Fprintf(f.IOStreams.ErrOut, "[lark-cli] [WARN] executable directory is not writable, credential file saved to fallback path: %s\n", path)
+	}
 	return nil
 }

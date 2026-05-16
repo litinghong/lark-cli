@@ -18,6 +18,7 @@ import (
 
 type mockExtProvider struct {
 	name       string
+	builtin    bool
 	account    *extcred.Account
 	token      *extcred.Token
 	err        error
@@ -26,6 +27,9 @@ type mockExtProvider struct {
 }
 
 func (m *mockExtProvider) Name() string { return m.name }
+func (m *mockExtProvider) Builtin() bool {
+	return m.builtin
+}
 func (m *mockExtProvider) ResolveAccount(ctx context.Context) (*extcred.Account, error) {
 	if m.accountErr != nil {
 		return nil, m.accountErr
@@ -481,6 +485,24 @@ func TestActiveExtensionProviderName_SkipsNilProvider(t *testing.T) {
 	// nil account + nil error = provider not applicable; fallback returns ""
 	cp := NewCredentialProvider(
 		[]extcred.Provider{&mockExtProvider{name: "sidecar"}}, // no account set → returns nil, nil
+		nil, nil, nil,
+	)
+	name, err := cp.ActiveExtensionProviderName(context.Background())
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if name != "" {
+		t.Errorf("got %q, want empty string", name)
+	}
+}
+
+func TestActiveExtensionProviderName_SkipsBuiltinProvider(t *testing.T) {
+	cp := NewCredentialProvider(
+		[]extcred.Provider{&mockExtProvider{
+			name:    "exe_file",
+			builtin: true,
+			account: &extcred.Account{AppID: "app"},
+		}},
 		nil, nil, nil,
 	)
 	name, err := cp.ActiveExtensionProviderName(context.Background())

@@ -162,6 +162,7 @@ lark-cli auth status
 | `auth check`  | Verify a specific scope (exit 0 = ok, 1 = missing)            |
 | `auth scopes` | List all available scopes for the app                          |
 | `auth list`   | List all authenticated users                                   |
+| `auth export` | Export current credential payload JSON (SDK/app-managed store) |
 
 ```bash
 # Interactive login (TUI guides domain and permission level selection)
@@ -172,6 +173,12 @@ lark-cli auth login --domain calendar,task
 
 # Recommended auto-approval scopes
 lark-cli auth login --recommend
+
+# Multi-user embedding: skip writing local .lark-cli-credentials.json
+lark-cli auth login --recommend --no-credential-file
+
+# Export current credential payload (same schema as .lark-cli-credentials.json)
+lark-cli auth export
 
 # Exact scope
 lark-cli auth login --scope "calendar:calendar:read"

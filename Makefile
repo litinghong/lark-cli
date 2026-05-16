@@ -8,7 +8,7 @@ DATE     := $(shell date +%Y-%m-%d)
 LDFLAGS  := -s -w -X $(MODULE)/internal/build.Version=$(VERSION) -X $(MODULE)/internal/build.Date=$(DATE)
 PREFIX   ?= /usr/local
 
-.PHONY: all build build-shared-darwin build-shared-linux build-shared-catalog vet test unit-test integration-test python-sdk-smoke install uninstall clean fetch_meta gitleaks
+.PHONY: all build build-shared-darwin build-shared-linux build-shared-catalog python-sdk-command-reference vet test unit-test integration-test python-sdk-smoke install uninstall clean fetch_meta gitleaks
 
 all: test
 
@@ -28,6 +28,9 @@ build-shared-linux: fetch_meta
 
 build-shared-catalog: fetch_meta
 	go run ./tools/dump_command_catalog > python_sdk/lark_cli_sdk/command_catalog.json
+
+python-sdk-command-reference: build-shared-catalog
+	python3 python_sdk/scripts/generate_command_reference.py
 
 vet: fetch_meta
 	go vet ./...

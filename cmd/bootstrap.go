@@ -26,5 +26,8 @@ func BootstrapInvocationContext(args []string) (cmdutil.InvocationContext, error
 	if err := fs.Parse(args); err != nil && !errors.Is(err, pflag.ErrHelp) {
 		return cmdutil.InvocationContext{}, err
 	}
-	return cmdutil.InvocationContext{Profile: globals.Profile}, nil
+	return cmdutil.InvocationContext{
+		Profile:            globals.Profile,
+		UserCredentialJSON: globals.UserCredentialJSON,
+	}, nil
 }

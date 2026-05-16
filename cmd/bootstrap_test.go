@@ -70,3 +70,14 @@ func TestBootstrapInvocationContext_HelpWithProfile(t *testing.T) {
 		t.Fatalf("profile = %q, want %q", inv.Profile, "target")
 	}
 }
+
+func TestBootstrapInvocationContext_UserCredentialJSON(t *testing.T) {
+	raw := `{"app_id":"cli_123","brand":"feishu","user_access_token":"u-1"}`
+	inv, err := BootstrapInvocationContext([]string{"--user-credential-json", raw, "auth", "status"})
+	if err != nil {
+		t.Fatalf("BootstrapInvocationContext() error = %v", err)
+	}
+	if inv.UserCredentialJSON != raw {
+		t.Fatalf("user credential json = %q, want %q", inv.UserCredentialJSON, raw)
+	}
+}

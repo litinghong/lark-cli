@@ -9,6 +9,7 @@ import (
 	"testing"
 
 	_ "github.com/larksuite/cli/extension/credential/env"
+	_ "github.com/larksuite/cli/extension/credential/inlinejson"
 	"github.com/larksuite/cli/extension/fileio"
 	"github.com/larksuite/cli/internal/core"
 	"github.com/larksuite/cli/internal/credential"
@@ -133,6 +134,27 @@ func TestNewDefault_ResolveAs_UsesDefaultAsFromEnvAccount(t *testing.T) {
 	}
 	if f.IdentityAutoDetected {
 		t.Fatal("IdentityAutoDetected = true, want false")
+	}
+}
+
+func TestNewDefault_InvocationUserCredentialJSONUsedByStrictModeAndConfig(t *testing.T) {
+	t.Setenv(envvars.CliAppID, "")
+	t.Setenv(envvars.CliAppSecret, "")
+	t.Setenv(envvars.CliUserAccessToken, "")
+	t.Setenv(envvars.CliTenantAccessToken, "")
+	t.Setenv("LARKSUITE_CLI_CONFIG_DIR", t.TempDir())
+
+	raw := `{"app_id":"inline-app","brand":"feishu","default_as":"user","user_access_token":"u-inline"}`
+	f := NewDefault(nil, InvocationContext{UserCredentialJSON: raw})
+	if got := f.ResolveStrictMode(context.Background()); got != core.StrictModeUser {
+		t.Fatalf("ResolveStrictMode() = %q, want %q", got, core.StrictModeUser)
+	}
+	cfg, err := f.Config()
+	if err != nil {
+		t.Fatalf("Config() error = %v", err)
+	}
+	if cfg.AppID != "inline-app" {
+		t.Fatalf("Config().AppID = %q, want %q", cfg.AppID, "inline-app")
 	}
 }
 

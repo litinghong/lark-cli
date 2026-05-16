@@ -66,6 +66,8 @@ def _build_auth_args(ns: argparse.Namespace) -> List[str]:
             args.append("--no-wait")
         if ns.device_code:
             args.extend(["--device-code", ns.device_code])
+        if ns.no_credential_file:
+            args.append("--no-credential-file")
 
     elif ns.command == "status":
         if ns.verify:
@@ -108,6 +110,7 @@ def build_parser() -> argparse.ArgumentParser:
     login.add_argument("--json", action="store_true", help="Structured JSON output")
     login.add_argument("--no-wait", action="store_true", help="Return device code without waiting")
     login.add_argument("--device-code", default="", help="Resume with a previous device code")
+    login.add_argument("--no-credential-file", action="store_true", help="Do not persist .lark-cli-credentials.json")
 
     logout = sub.add_parser("logout", help="auth logout")
     _ = logout
@@ -123,6 +126,9 @@ def build_parser() -> argparse.ArgumentParser:
 
     list_cmd = sub.add_parser("list", help="auth list")
     _ = list_cmd
+
+    export_cmd = sub.add_parser("export", help="auth export")
+    _ = export_cmd
 
     return parser
 

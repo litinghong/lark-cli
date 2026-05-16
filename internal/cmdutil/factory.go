@@ -18,6 +18,7 @@ import (
 	"github.com/larksuite/cli/internal/client"
 	"github.com/larksuite/cli/internal/core"
 	"github.com/larksuite/cli/internal/credential"
+	"github.com/larksuite/cli/internal/invocation"
 	"github.com/larksuite/cli/internal/keychain"
 	"github.com/larksuite/cli/internal/output"
 )
@@ -26,7 +27,8 @@ import (
 // All function fields are lazily initialized and cached after first call.
 // In tests, replace any field to stub out external dependencies.
 type InvocationContext struct {
-	Profile string
+	Profile            string
+	UserCredentialJSON string
 }
 
 type Factory struct {
@@ -53,6 +55,14 @@ func (f *Factory) ResolveFileIO(ctx context.Context) fileio.FileIO {
 		return nil
 	}
 	return f.FileIOProvider.ResolveFileIO(ctx)
+}
+
+func (f *Factory) withInvocationContext(ctx context.Context) context.Context {
+	opts := invocation.Options{
+		Profile:            f.Invocation.Profile,
+		UserCredentialJSON: f.Invocation.UserCredentialJSON,
+	}
+	return invocation.WithContext(ctx, opts)
 }
 
 // ResolveAs returns the effective identity type.
@@ -110,7 +120,7 @@ func (f *Factory) resolveIdentityHint(ctx context.Context) *credential.IdentityH
 	if f.Credential == nil {
 		return nil
 	}
-	hint, err := f.Credential.ResolveIdentityHint(ctx)
+	hint, err := f.Credential.ResolveIdentityHint(f.withInvocationContext(ctx))
 	if err != nil {
 		return nil
 	}
@@ -142,7 +152,7 @@ func (f *Factory) ResolveStrictMode(ctx context.Context) core.StrictMode {
 	if f.Credential == nil {
 		return core.StrictModeOff
 	}
-	acct, err := f.Credential.ResolveAccount(ctx)
+	acct, err := f.Credential.ResolveAccount(f.withInvocationContext(ctx))
 	if err != nil || acct == nil {
 		return core.StrictModeOff
 	}
@@ -213,7 +223,7 @@ func (f *Factory) RequireBuiltinCredentialProvider(ctx context.Context, command 
 	if f.Credential == nil {
 		return nil
 	}
-	provName, err := f.Credential.ActiveExtensionProviderName(ctx)
+	provName, err := f.Credential.ActiveExtensionProviderName(f.withInvocationContext(ctx))
 	if err != nil {
 		return err
 	}

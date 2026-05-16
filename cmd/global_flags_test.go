@@ -27,6 +27,10 @@ func TestRegisterGlobalFlags_PolicyVisible(t *testing.T) {
 	if flag.Hidden {
 		t.Fatal("profile flag should be visible when HideProfile is false")
 	}
+	credFlag := fs.Lookup("user-credential-json")
+	if credFlag == nil {
+		t.Fatal("user-credential-json flag should be registered")
+	}
 }
 
 func TestRegisterGlobalFlags_PolicyHidden(t *testing.T) {
@@ -46,6 +50,20 @@ func TestRegisterGlobalFlags_PolicyHidden(t *testing.T) {
 	}
 	if opts.Profile != "x" {
 		t.Fatalf("opts.Profile = %q, want %q", opts.Profile, "x")
+	}
+}
+
+func TestRegisterGlobalFlags_UserCredentialJSON(t *testing.T) {
+	fs := pflag.NewFlagSet("test", pflag.ContinueOnError)
+	opts := &GlobalOptions{}
+	RegisterGlobalFlags(fs, opts)
+
+	raw := `{"app_id":"a","user_access_token":"u"}`
+	if err := fs.Parse([]string{"--user-credential-json", raw}); err != nil {
+		t.Fatalf("Parse() user-credential-json error = %v", err)
+	}
+	if opts.UserCredentialJSON != raw {
+		t.Fatalf("opts.UserCredentialJSON = %q, want %q", opts.UserCredentialJSON, raw)
 	}
 }
 

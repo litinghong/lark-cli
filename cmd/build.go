@@ -20,6 +20,7 @@ import (
 	_ "github.com/larksuite/cli/events"
 	"github.com/larksuite/cli/internal/build"
 	"github.com/larksuite/cli/internal/cmdutil"
+	invctx "github.com/larksuite/cli/internal/invocation"
 	"github.com/larksuite/cli/internal/keychain"
 	"github.com/larksuite/cli/shortcuts"
 	"github.com/spf13/cobra"
@@ -71,6 +72,11 @@ func Build(ctx context.Context, inv cmdutil.InvocationContext, opts ...BuildOpti
 // inv and BuildOptions alone. Any state-dependent decision (disk, network,
 // env) belongs in the caller and must be threaded in via BuildOption.
 func buildInternal(ctx context.Context, inv cmdutil.InvocationContext, opts ...BuildOption) (*cmdutil.Factory, *cobra.Command) {
+	ctx = invctx.WithContext(ctx, invctx.Options{
+		Profile:            inv.Profile,
+		UserCredentialJSON: inv.UserCredentialJSON,
+	})
+
 	// cfg.globals.Profile is left zero here; it's bound to the --profile
 	// flag in RegisterGlobalFlags and filled by cobra's parse step.
 	cfg := &buildConfig{}

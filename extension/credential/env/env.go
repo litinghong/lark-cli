@@ -15,7 +15,8 @@ import (
 // Provider resolves credentials from environment variables.
 type Provider struct{}
 
-func (p *Provider) Name() string { return "env" }
+func (p *Provider) Name() string  { return "env" }
+func (p *Provider) Builtin() bool { return true }
 
 func (p *Provider) ResolveAccount(ctx context.Context) (*credential.Account, error) {
 	appID := os.Getenv(envvars.CliAppID)

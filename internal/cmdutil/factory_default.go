@@ -69,7 +69,7 @@ func NewDefault(streams *IOStreams, inv InvocationContext) *Factory {
 
 	// Phase 3: Config derived from Credential via an explicit conversion boundary.
 	f.Config = sync.OnceValues(func() (*core.CliConfig, error) {
-		acct, err := f.Credential.ResolveAccount(context.Background())
+		acct, err := f.Credential.ResolveAccount(f.withInvocationContext(context.Background()))
 		if err != nil {
 			return nil, err
 		}
@@ -120,7 +120,7 @@ func cachedHttpClientFunc(f *Factory) func() (*http.Client, error) {
 
 func cachedLarkClientFunc(f *Factory) func() (*lark.Client, error) {
 	return sync.OnceValues(func() (*lark.Client, error) {
-		acct, err := f.Credential.ResolveAccount(context.Background())
+		acct, err := f.Credential.ResolveAccount(f.withInvocationContext(context.Background()))
 		if err != nil {
 			return nil, err
 		}

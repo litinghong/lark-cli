@@ -179,6 +179,7 @@ python3 python_sdk/examples/auth.py setup-login --new
 # 第二步：用户在浏览器完成授权后，使用 device_code 续上轮询
 python3 python_sdk/examples/auth.py login --device-code <DEVICE_CODE> --json --no-credential-file
 ```
+`demo-flow` 现在包含第 4 步自动 refresh（`auth export` 后刷新 token），并将刷新后的凭据 JSON 输出到 stdout，不会写入任何凭据文件。
 
 ```bash
 # SDK 多租户推荐：不落盘 config.json，直接返回配置 JSON
@@ -197,6 +198,12 @@ python3 python_sdk/examples/auth.py \
 python3 python_sdk/examples/auth.py login --device-code <DEVICE_CODE> --json --no-credential-file \
   --emit-auth-export \
   --merge-credential-file
+```
+
+```bash
+# 可选：基于授权结果中的 refresh_token 刷新用户鉴权（只返回 JSON，不做任何落盘）
+python3 python_sdk/examples/auth.py refresh \
+  --credential-json '<AUTH_EXPORT_JSON>'
 ```
 
 ```bash

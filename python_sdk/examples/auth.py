@@ -5,6 +5,10 @@ import argparse
 import json
 import os
 import sys
+import time
+import urllib.error
+import urllib.parse
+import urllib.request
 from pathlib import Path
 from typing import Dict, List, Optional
 
@@ -181,6 +185,173 @@ def _load_config_payload_from_ns(ns: argparse.Namespace) -> Optional[Dict[str, o
         if isinstance(payload, dict):
             return payload
     return None
+
+
+def _resolve_oauth_token_endpoint(brand_raw: str) -> str:
+    brand = (brand_raw or "feishu").strip().lower()
+    if brand == "lark":
+        return "https://open.larksuite.com/open-apis/authen/v2/oauth/token"
+    return "https://open.feishu.cn/open-apis/authen/v2/oauth/token"
+
+
+def _load_refresh_credential_payload(ns: argparse.Namespace) -> Optional[Dict[str, object]]:
+    if getattr(ns, "credential_json", ""):
+        return _load_json_text(str(ns.credential_json))
+    if getattr(ns, "credential_json_file", ""):
+        p = Path(str(ns.credential_json_file)).expanduser()
+        try:
+            payload = json.loads(p.read_text(encoding="utf-8"))
+        except (OSError, json.JSONDecodeError):
+            return None
+        if isinstance(payload, dict):
+            return payload
+        return None
+    if getattr(ns, "user_credential_json", ""):
+        return _load_json_text(str(ns.user_credential_json))
+    return None
+
+
+def _as_int(value: object, default: int) -> int:
+    try:
+        return int(value)
+    except (TypeError, ValueError):
+        return default
+
+
+def _run_refresh_and_exit(ns: argparse.Namespace) -> int:
+    payload = _load_refresh_credential_payload(ns)
+    if not isinstance(payload, dict):
+        sys.stderr.write("[auth.py] ERROR: refresh requires valid credential JSON via --credential-json / --credential-json-file / --user-credential-json\n")
+        return 1
+    return _refresh_with_payload_and_emit(payload, ns.http_timeout_sec)
+
+
+def _refresh_with_payload_and_emit(payload: Dict[str, object], http_timeout_sec: int) -> int:
+    app_id = str(payload.get("app_id", "") or "").strip()
+    app_secret = str(payload.get("app_secret", "") or "").strip()
+    refresh_token = str(payload.get("refresh_token", "") or "").strip()
+    if not app_id or not app_secret or not refresh_token:
+        sys.stderr.write("[auth.py] ERROR: credential JSON must contain non-empty app_id/app_secret/refresh_token\n")
+        return 1
+
+    brand = str(payload.get("brand", "") or "feishu").strip().lower() or "feishu"
+    endpoint = _resolve_oauth_token_endpoint(brand)
+    form_data = urllib.parse.urlencode(
+        {
+            "grant_type": "refresh_token",
+            "refresh_token": refresh_token,
+            "client_id": app_id,
+            "client_secret": app_secret,
+        }
+    ).encode("utf-8")
+    req = urllib.request.Request(
+        endpoint,
+        data=form_data,
+        headers={"Content-Type": "application/x-www-form-urlencoded"},
+        method="POST",
+    )
+
+    try:
+        with urllib.request.urlopen(req, timeout=http_timeout_sec) as resp:
+            body = resp.read().decode("utf-8", errors="replace")
+    except urllib.error.HTTPError as err:
+        body = err.read().decode("utf-8", errors="replace")
+        sys.stderr.write(f"[auth.py] ERROR: refresh request failed: HTTP {err.code}\n")
+        if body:
+            sys.stderr.write(body + "\n")
+        return 1
+    except urllib.error.URLError as err:
+        sys.stderr.write(f"[auth.py] ERROR: refresh request failed: {err}\n")
+        return 1
+
+    try:
+        data = json.loads(body)
+    except json.JSONDecodeError:
+        sys.stderr.write("[auth.py] ERROR: refresh endpoint returned non-JSON response\n")
+        return 1
+    if not isinstance(data, dict):
+        sys.stderr.write("[auth.py] ERROR: refresh endpoint returned invalid JSON payload\n")
+        return 1
+
+    lark_code = _as_int(data.get("code"), 0)
+    oauth_error = str(data.get("error", "") or "").strip()
+    if (lark_code != 0 and lark_code != -1) or oauth_error:
+        out = {
+            "ok": False,
+            "error": {
+                "code": lark_code,
+                "error": oauth_error,
+                "message": str(data.get("msg", "") or data.get("error_description", "") or "refresh failed"),
+            },
+            "raw": data,
+        }
+        sys.stdout.write(json.dumps(out, ensure_ascii=False) + "\n")
+        return 1
+
+    access_token = str(data.get("access_token", "") or "").strip()
+    next_refresh_token = str(data.get("refresh_token", "") or "").strip() or refresh_token
+    if not access_token:
+        sys.stderr.write("[auth.py] ERROR: refresh succeeded but access_token is empty\n")
+        return 1
+
+    now_ms = int(time.time() * 1000)
+    expires_in = _as_int(data.get("expires_in"), 7200)
+    refresh_expires_in = _as_int(data.get("refresh_token_expires_in"), 0)
+
+    out_payload = dict(payload)
+    out_payload.update(
+        {
+            "app_id": app_id,
+            "app_secret": app_secret,
+            "brand": brand,
+            "default_as": str(payload.get("default_as", "") or "user"),
+            "user_access_token": access_token,
+            "refresh_token": next_refresh_token,
+            "expires_at": now_ms + max(expires_in, 0) * 1000,
+        }
+    )
+    if refresh_expires_in > 0:
+        out_payload["refresh_expires_at"] = now_ms + refresh_expires_in * 1000
+    elif _as_int(payload.get("refresh_expires_at"), 0) > 0:
+        out_payload["refresh_expires_at"] = _as_int(payload.get("refresh_expires_at"), 0)
+    if str(data.get("scope", "") or "").strip():
+        out_payload["scope"] = str(data.get("scope", "") or "").strip()
+
+    result = {
+        "ok": True,
+        "event": "token_refreshed",
+        "credential": out_payload,
+        "oauth_response": data,
+    }
+    sys.stdout.write(json.dumps(result, ensure_ascii=False) + "\n")
+    return 0
+
+
+def _export_credential_payload(
+    client: LarkCLIClient,
+    timeout_ms: Optional[int],
+    env_overrides: Optional[Dict[str, Optional[str]]] = None,
+) -> Optional[Dict[str, object]]:
+    export_result: LarkCLIResult = client.run(
+        ["auth", "export"],
+        timeout_ms=timeout_ms,
+        env_overrides=env_overrides,
+    )
+    if export_result.stderr:
+        sys.stderr.write(export_result.stderr_text)
+    if not export_result.ok or int(export_result.exit_code) != 0:
+        if export_result.error:
+            sys.stderr.write(export_result.error + "\n")
+        return None
+    payload = export_result.json_envelope
+    if not isinstance(payload, dict):
+        try:
+            payload = json.loads(export_result.stdout_text or "{}")
+        except json.JSONDecodeError:
+            return None
+    if not isinstance(payload, dict) or not payload:
+        return None
+    return payload
 
 
 def _remove_credential_fallback_file() -> None:
@@ -543,11 +714,20 @@ def _run_demo_flow_and_exit(
     if login_exit != 0:
         return login_exit
 
-    sys.stderr.write("[auth.py] step 3/3: auth status --verify\n")
+    sys.stderr.write("[auth.py] step 3/4: auth status --verify\n")
     status_args = ["auth", "status"]
     if ns.verify:
         status_args.append("--verify")
-    return _run_and_exit(client, status_args, timeout_ms=ns.timeout_ms, env_overrides=strict_off_env)
+    status_exit = _run_and_exit(client, status_args, timeout_ms=ns.timeout_ms, env_overrides=strict_off_env)
+    if status_exit != 0:
+        return status_exit
+
+    sys.stderr.write("[auth.py] step 4/4: auth export + refresh (no file writes)\n")
+    export_payload = _export_credential_payload(client, timeout_ms=ns.timeout_ms, env_overrides=strict_off_env)
+    if not isinstance(export_payload, dict):
+        sys.stderr.write("[auth.py] ERROR: failed to export credential payload for refresh\n")
+        return 1
+    return _refresh_with_payload_and_emit(export_payload, ns.http_timeout_sec)
 
 
 def _build_auth_args(ns: argparse.Namespace) -> List[str]:
@@ -681,6 +861,24 @@ def build_parser() -> argparse.ArgumentParser:
     export_cmd = sub.add_parser("export", help="auth export")
     _ = export_cmd
 
+    refresh = sub.add_parser("refresh", help="refresh user token and return updated credential JSON (no file writes)")
+    refresh.add_argument(
+        "--credential-json",
+        default="",
+        help="Credential JSON text (preferred in multi-user apps)",
+    )
+    refresh.add_argument(
+        "--credential-json-file",
+        default="",
+        help="Path to credential JSON file (input only; this command never writes files)",
+    )
+    refresh.add_argument(
+        "--http-timeout-sec",
+        type=int,
+        default=30,
+        help="HTTP timeout in seconds for refresh request",
+    )
+
     config_init = sub.add_parser("config-init", help="config init")
     config_init.add_argument("--new", action="store_true", help="Create and switch to a new profile")
     config_init.add_argument("--no-credential-file", action="store_true", help="Do not persist .lark-cli-credentials.json")
@@ -711,6 +909,12 @@ def build_parser() -> argparse.ArgumentParser:
     demo_flow.add_argument("--json", action="store_true", default=True, help="Structured JSON output for auth login")
     demo_flow.add_argument("--no-credential-file", action="store_true", default=True, help="Do not persist .lark-cli-credentials.json")
     demo_flow.add_argument("--verify", action="store_true", default=True, help="Use --verify for the final auth status check")
+    demo_flow.add_argument(
+        "--http-timeout-sec",
+        type=int,
+        default=30,
+        help="HTTP timeout in seconds for demo-flow refresh request",
+    )
 
     return parser
 
@@ -744,6 +948,8 @@ def main() -> int:
 
     if ns.command == "demo-flow":
         return _run_demo_flow_and_exit(client, ns, env_overrides_base=env_overrides or None)
+    if ns.command == "refresh":
+        return _run_refresh_and_exit(ns)
 
     try:
         cli_args = _build_auth_args(ns)

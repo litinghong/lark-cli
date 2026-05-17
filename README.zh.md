@@ -91,6 +91,13 @@ lark-cli auth login --recommend
 lark-cli calendar +agenda
 ```
 
+多租户 / SDK 场景（不落盘 `config.json`）可用：
+
+```bash
+# 仅返回配置 JSON，不写入本地 config.json / keychain
+lark-cli config init --new --no-save-config --emit-config-json
+```
+
 ### 快速开始（AI Agent）
 
 > 以下步骤面向 AI Agent，部分步骤需要用户在浏览器中配合完成。
@@ -101,20 +108,27 @@ lark-cli calendar +agenda
 npx @larksuite/cli@latest install
 ```
 
-**第 2 步 — 配置应用凭证**
+**第 2 步 — 一键配置并发起授权**
 
-> 在后台运行此命令，命令会输出一个授权链接，提取该链接并发送给用户，用户在浏览器中完成配置后命令会自动退出。
+> 在后台运行此命令。命令会完成应用配置并返回 `verification_url` 与 `device_code`。将授权链接原样发给用户。
 
 ```bash
-lark-cli config init --new
+python3 python_sdk/examples/auth.py setup-login --new
 ```
 
-**第 3 步 — 登录**
+**第 3 步 — 完成登录轮询**
 
-> 同上，后台运行，提取授权链接发给用户。
+> 用户在浏览器完成授权后，使用上一步返回的 `device_code` 续上登录轮询（建议超时 >= 600s）。
 
 ```bash
-lark-cli auth login --recommend
+python3 python_sdk/examples/auth.py login --device-code <DEVICE_CODE> --json --no-credential-file
+```
+
+```bash
+# 可选：第二步完成后，额外输出授权内容并合并到凭据文件
+python3 python_sdk/examples/auth.py login --device-code <DEVICE_CODE> --json --no-credential-file \
+  --emit-auth-export \
+  --merge-credential-file
 ```
 
 **第 4 步 — 验证**

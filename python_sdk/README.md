@@ -31,8 +31,13 @@ make build-shared-darwin
 # Linux
 make build-shared-linux
 
-# Linux 在 Mac 中构建
-docker run --rm -it -v "$PWD":/src -w /src docker.m.daocloud.io/library/golang:1.24 bash -c 'make build-shared-linux'
+# Linux 在 Mac 中构建（x86_64）
+docker run --rm -it \
+  --platform linux/amd64 \
+  -v "$PWD":/src \
+  -w /src \
+  docker.m.daocloud.io/library/golang:1.24 \
+  bash -c 'make build-shared-linux'
 
 # 生成命令目录（自动方法依赖）
 make build-shared-catalog
@@ -164,6 +169,41 @@ lark-cli auth export
 ## 7. 可编排授权流程（后端 + 前端）
 
 下面是适合 Web/多用户应用的标准流程。
+
+### 7.0 `auth.py` 示例的两步登录（飞书工作台/Agent 常用）
+
+```bash
+# 第一步：配置应用并发起授权，返回 verification_url + device_code
+python3 python_sdk/examples/auth.py setup-login --new
+
+# 第二步：用户在浏览器完成授权后，使用 device_code 续上轮询
+python3 python_sdk/examples/auth.py login --device-code <DEVICE_CODE> --json --no-credential-file
+```
+
+```bash
+# SDK 多租户推荐：不落盘 config.json，直接返回配置 JSON
+python3 python_sdk/examples/auth.py setup-login --new --no-save-config --emit-config-json
+```
+
+```bash
+# 第二步可直接使用 config JSON（auth.py 会自动注入 LARKSUITE_CLI_APP_ID/APP_SECRET/BRAND）
+python3 python_sdk/examples/auth.py \
+  --config-json '<STEP1_CONFIG_JSON>' \
+  login --device-code <DEVICE_CODE> --json --no-credential-file
+```
+
+```bash
+# 可选：第二步成功后输出授权内容，并合并到 .lark-cli-credentials.json
+python3 python_sdk/examples/auth.py login --device-code <DEVICE_CODE> --json --no-credential-file \
+  --emit-auth-export \
+  --merge-credential-file
+```
+
+```bash
+# 可选：将配置目录隔离到指定路径，并在配置完成后直接输出 config.json 内容
+python3 python_sdk/examples/auth.py --config-dir /tmp/lark-sdk-u123 \
+  setup-login --new --emit-config-json
+```
 
 ### 步骤 A：发起授权（后端）
 

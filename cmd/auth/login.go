@@ -7,6 +7,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"os"
 	"sort"
 	"strings"
 	"time"
@@ -17,6 +18,7 @@ import (
 	"github.com/larksuite/cli/internal/cmdutil"
 	"github.com/larksuite/cli/internal/core"
 	"github.com/larksuite/cli/internal/credentialfile"
+	"github.com/larksuite/cli/internal/envvars"
 	"github.com/larksuite/cli/internal/output"
 	"github.com/larksuite/cli/internal/registry"
 	"github.com/larksuite/cli/shortcuts"
@@ -262,8 +264,10 @@ func authLoginRun(opts *LoginOptions) error {
 
 	// --no-wait: return immediately with device code and URL
 	if opts.NoWait {
-		if err := saveLoginRequestedScope(authResp.DeviceCode, finalScope); err != nil {
-			fmt.Fprintf(f.IOStreams.ErrOut, "[lark-cli] [WARN] auth login: failed to cache requested scopes: %v\n", err)
+		if shouldPersistLoginState(f) {
+			if err := saveLoginRequestedScope(authResp.DeviceCode, finalScope); err != nil {
+				fmt.Fprintf(f.IOStreams.ErrOut, "[lark-cli] [WARN] auth login: failed to cache requested scopes: %v\n", err)
+			}
 		}
 		data := map[string]interface{}{
 			"verification_url": authResp.VerificationUriComplete,
@@ -357,9 +361,11 @@ func authLoginRun(opts *LoginOptions) error {
 	}
 
 	// Step 8: Update config — overwrite Users to single user, clean old tokens
-	if err := syncLoginUserToProfile(config.ProfileName, config.AppID, openId, userName); err != nil {
-		_ = larkauth.RemoveStoredToken(config.AppID, openId)
-		return output.Errorf(output.ExitInternal, "internal", "failed to update login profile: %v", err)
+	if shouldPersistLoginState(f) {
+		if err := syncLoginUserToProfile(config.ProfileName, config.AppID, openId, userName); err != nil {
+			_ = larkauth.RemoveStoredToken(config.AppID, openId)
+			return output.Errorf(output.ExitInternal, "internal", "failed to update login profile: %v", err)
+		}
 	}
 	if !opts.NoCredentialFile {
 		if err := persistLoginCredentialFile(f, config, openId, userName, storedToken); err != nil {
@@ -384,13 +390,18 @@ func authLoginPollDeviceCode(opts *LoginOptions, config *core.CliConfig, msg *lo
 	if err != nil {
 		return err
 	}
-	requestedScope, err := loadLoginRequestedScope(opts.DeviceCode)
-	if err != nil {
-		fmt.Fprintf(f.IOStreams.ErrOut, "[lark-cli] [WARN] auth login: failed to load cached requested scopes: %v\n", err)
-	}
-	cleanupRequestedScope := func() {
-		if err := removeLoginRequestedScope(opts.DeviceCode); err != nil {
-			fmt.Fprintf(f.IOStreams.ErrOut, "[lark-cli] [WARN] auth login: failed to remove cached requested scopes: %v\n", err)
+	requestedScope := ""
+	persistState := shouldPersistLoginState(f)
+	cleanupRequestedScope := func() {}
+	if persistState {
+		requestedScope, err = loadLoginRequestedScope(opts.DeviceCode)
+		if err != nil {
+			fmt.Fprintf(f.IOStreams.ErrOut, "[lark-cli] [WARN] auth login: failed to load cached requested scopes: %v\n", err)
+		}
+		cleanupRequestedScope = func() {
+			if err := removeLoginRequestedScope(opts.DeviceCode); err != nil {
+				fmt.Fprintf(f.IOStreams.ErrOut, "[lark-cli] [WARN] auth login: failed to remove cached requested scopes: %v\n", err)
+			}
 		}
 	}
 	// Skip the stderr hint in JSON mode — the --no-wait call that issued the
@@ -404,12 +415,14 @@ func authLoginPollDeviceCode(opts *LoginOptions, config *core.CliConfig, msg *lo
 		opts.DeviceCode, 5, 600, f.IOStreams.ErrOut)
 
 	if !result.OK {
-		if shouldRemoveLoginRequestedScope(result) {
+		if persistState && shouldRemoveLoginRequestedScope(result) {
 			cleanupRequestedScope()
 		}
 		return output.ErrAuth("authorization failed: %s", result.Message)
 	}
-	defer cleanupRequestedScope()
+	if persistState {
+		defer cleanupRequestedScope()
+	}
 	if result.Token == nil {
 		return output.ErrAuth("authorization succeeded but no token returned")
 	}
@@ -444,9 +457,11 @@ func authLoginPollDeviceCode(opts *LoginOptions, config *core.CliConfig, msg *lo
 	}
 
 	// Update config — overwrite Users to single user, clean old tokens
-	if err := syncLoginUserToProfile(config.ProfileName, config.AppID, openId, userName); err != nil {
-		_ = larkauth.RemoveStoredToken(config.AppID, openId)
-		return output.Errorf(output.ExitInternal, "internal", "failed to update login profile: %v", err)
+	if persistState {
+		if err := syncLoginUserToProfile(config.ProfileName, config.AppID, openId, userName); err != nil {
+			_ = larkauth.RemoveStoredToken(config.AppID, openId)
+			return output.Errorf(output.ExitInternal, "internal", "failed to update login profile: %v", err)
+		}
 	}
 	if !opts.NoCredentialFile {
 		if err := persistLoginCredentialFile(f, config, openId, userName, storedToken); err != nil {
@@ -523,6 +538,21 @@ func persistLoginCredentialFile(f *cmdutil.Factory, config *core.CliConfig, open
 		fmt.Fprintf(f.IOStreams.ErrOut, "[lark-cli] [WARN] executable directory is not writable, credential file saved to fallback path: %s\n", path)
 	}
 	return nil
+}
+
+func shouldPersistLoginState(f *cmdutil.Factory) bool {
+	if f == nil {
+		return true
+	}
+	if strings.TrimSpace(f.Invocation.UserCredentialJSON) != "" {
+		return false
+	}
+	// Environment credential mode is also externally managed and should not
+	// mutate local config.json/profile state in multi-tenant SDK integrations.
+	if strings.TrimSpace(os.Getenv(envvars.CliAppID)) != "" {
+		return false
+	}
+	return true
 }
 
 // collectScopesForDomains collects API scopes (from from_meta projects) and

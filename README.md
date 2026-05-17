@@ -91,6 +91,13 @@ lark-cli auth login --recommend
 lark-cli calendar +agenda
 ```
 
+For multi-tenant / SDK integrations (no local `config.json` persistence):
+
+```bash
+# Return config JSON only, without writing config.json/keychain
+lark-cli config init --new --no-save-config --emit-config-json
+```
+
 ## Quick Start (AI Agent)
 
 > The following steps are for AI Agents. Some steps require the user to complete actions in a browser.
@@ -101,20 +108,28 @@ lark-cli calendar +agenda
 npx @larksuite/cli@latest install
 ```
 
-**Step 2 — Configure app credentials**
+**Step 2 — One-shot setup + start authorization**
 
-> Run this command in the background. It will output an authorization URL — extract it and send it to the user. The command exits automatically after the user completes the setup in the browser.
+> Run this command in the background. It configures the app and returns `verification_url` + `device_code`. Forward the URL to the user exactly as returned.
 
 ```bash
-lark-cli config init --new
+python3 python_sdk/examples/auth.py setup-login --new
 ```
 
-**Step 3 — Login**
+**Step 3 — Resume and complete login**
 
-> Same as above: run in the background, extract the authorization URL and send it to the user.
+> After the user authorizes in browser, resume polling with the `device_code` from Step 2 (recommended timeout >= 600s).
 
 ```bash
-lark-cli auth login --recommend
+python3 python_sdk/examples/auth.py login --device-code <DEVICE_CODE> --json --no-credential-file
+```
+
+```bash
+# Optional: after step 2 succeeds, also print exported credential JSON
+# and merge it into the credential file.
+python3 python_sdk/examples/auth.py login --device-code <DEVICE_CODE> --json --no-credential-file \
+  --emit-auth-export \
+  --merge-credential-file
 ```
 
 **Step 4 — Verify**

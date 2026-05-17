@@ -5,6 +5,7 @@ package config
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"io"
 	"os"
@@ -220,6 +221,43 @@ func TestConfigInitRun_NonTerminal_NoFlags_RejectsWithHint(t *testing.T) {
 	}
 	if !strings.Contains(msg, "terminal") {
 		t.Errorf("expected error to mention terminal, got: %s", msg)
+	}
+}
+
+func TestConfigInitRun_NoSaveConfig_PrintsConfigPayloadWithoutPersisting(t *testing.T) {
+	clearAgentEnv(t)
+	configDir := t.TempDir()
+	t.Setenv("LARKSUITE_CLI_CONFIG_DIR", configDir)
+
+	f, stdout, _, _ := cmdutil.TestFactory(t, nil)
+	opts := &ConfigInitOptions{
+		Factory:      f,
+		Ctx:          context.Background(),
+		AppID:        "cli_test_no_save",
+		appSecret:    "sec_test_no_save",
+		Brand:        "feishu",
+		Lang:         "zh",
+		NoSaveConfig: true,
+	}
+	if err := configInitRun(opts); err != nil {
+		t.Fatalf("configInitRun() error = %v", err)
+	}
+
+	var got core.MultiAppConfig
+	if err := json.Unmarshal(stdout.Bytes(), &got); err != nil {
+		t.Fatalf("stdout JSON unmarshal error = %v; output=%s", err, stdout.String())
+	}
+	if len(got.Apps) != 1 {
+		t.Fatalf("apps len = %d, want 1", len(got.Apps))
+	}
+	if got.Apps[0].AppId != "cli_test_no_save" {
+		t.Fatalf("appId = %q", got.Apps[0].AppId)
+	}
+	if got.Apps[0].AppSecret.Plain != "sec_test_no_save" {
+		t.Fatalf("appSecret plain = %q", got.Apps[0].AppSecret.Plain)
+	}
+	if _, err := os.Stat(filepath.Join(configDir, "config.json")); !errors.Is(err, os.ErrNotExist) {
+		t.Fatalf("expected config.json not to exist, stat err=%v", err)
 	}
 }
 

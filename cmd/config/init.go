@@ -43,6 +43,8 @@ type ConfigInitOptions struct {
 	// to bypass.
 	ForceInit        bool
 	NoCredentialFile bool
+	NoSaveConfig     bool // do not persist config.json/keychain; return config payload only
+	EmitConfigJSON   bool // print config JSON payload to stdout
 }
 
 // NewCmdConfigInit creates the config init subcommand.
@@ -83,6 +85,8 @@ if the user explicitly wants a separate app inside the Agent workspace.`,
 	cmd.Flags().StringVar(&opts.ProfileName, "name", "", "create or update a named profile (append instead of replace)")
 	cmd.Flags().BoolVar(&opts.ForceInit, "force-init", false, "allow init inside an Agent workspace (OPENCLAW_HOME / HERMES_HOME); use config bind instead unless you really want a separate app")
 	cmd.Flags().BoolVar(&opts.NoCredentialFile, "no-credential-file", false, "do not persist .lark-cli-credentials.json during init/create flows")
+	cmd.Flags().BoolVar(&opts.NoSaveConfig, "no-save-config", false, "do not persist config.json or keychain entries; return config payload only")
+	cmd.Flags().BoolVar(&opts.EmitConfigJSON, "emit-config-json", false, "print config JSON payload to stdout")
 
 	return cmd
 }
@@ -277,15 +281,21 @@ func configInitRun(opts *ConfigInitOptions) error {
 	// Mode 1: Non-interactive
 	if opts.AppID != "" && opts.appSecret != "" {
 		brand := parseBrand(opts.Brand)
-		secret, err := core.ForStorage(opts.AppID, core.PlainSecret(opts.appSecret), f.Keychain)
-		if err != nil {
-			return output.Errorf(output.ExitInternal, "internal", "%v", err)
+		secret := core.PlainSecret(opts.appSecret)
+		if !opts.NoSaveConfig {
+			var err error
+			secret, err = core.ForStorage(opts.AppID, core.PlainSecret(opts.appSecret), f.Keychain)
+			if err != nil {
+				return output.Errorf(output.ExitInternal, "internal", "%v", err)
+			}
+			if err := saveInitConfig(opts.ProfileName, existing, f, opts.AppID, secret, brand, opts.Lang); err != nil {
+				return output.Errorf(output.ExitInternal, "internal", "failed to save config: %v", err)
+			}
+			output.PrintSuccess(f.IOStreams.ErrOut, fmt.Sprintf("Configuration saved to %s", core.GetConfigPath()))
+		} else {
+			output.PrintSuccess(f.IOStreams.ErrOut, "Configuration generated in memory only (not persisted)")
 		}
-		if err := saveInitConfig(opts.ProfileName, existing, f, opts.AppID, secret, brand, opts.Lang); err != nil {
-			return output.Errorf(output.ExitInternal, "internal", "failed to save config: %v", err)
-		}
-		output.PrintSuccess(f.IOStreams.ErrOut, fmt.Sprintf("Configuration saved to %s", core.GetConfigPath()))
-		output.PrintJson(f.IOStreams.Out, map[string]interface{}{"appId": opts.AppID, "appSecret": "****", "brand": brand})
+		printInitOutput(f, opts, existing, opts.ProfileName, opts.AppID, secret, brand, opts.Lang)
 		return nil
 	}
 
@@ -318,20 +328,25 @@ func configInitRun(opts *ConfigInitOptions) error {
 		if result == nil {
 			return output.ErrValidation("app creation returned no result")
 		}
-		existing, _ := core.LoadMultiAppConfig()
-		secret, err := core.ForStorage(result.AppID, core.PlainSecret(result.AppSecret), f.Keychain)
-		if err != nil {
-			return output.Errorf(output.ExitInternal, "internal", "%v", err)
-		}
-		if err := saveInitConfig(opts.ProfileName, existing, f, result.AppID, secret, result.Brand, opts.Lang); err != nil {
-			return output.Errorf(output.ExitInternal, "internal", "failed to save config: %v", err)
-		}
-		if !opts.NoCredentialFile {
-			if err := persistInitCredentialFile(f, result); err != nil {
-				return output.Errorf(output.ExitInternal, "internal", "failed to save credential file: %v", err)
+		secret := core.PlainSecret(result.AppSecret)
+		if !opts.NoSaveConfig {
+			existing, _ := core.LoadMultiAppConfig()
+			secret, err = core.ForStorage(result.AppID, core.PlainSecret(result.AppSecret), f.Keychain)
+			if err != nil {
+				return output.Errorf(output.ExitInternal, "internal", "%v", err)
 			}
+			if err := saveInitConfig(opts.ProfileName, existing, f, result.AppID, secret, result.Brand, opts.Lang); err != nil {
+				return output.Errorf(output.ExitInternal, "internal", "failed to save config: %v", err)
+			}
+			if !opts.NoCredentialFile {
+				if err := persistInitCredentialFile(f, result); err != nil {
+					return output.Errorf(output.ExitInternal, "internal", "failed to save credential file: %v", err)
+				}
+			}
+		} else {
+			output.PrintSuccess(f.IOStreams.ErrOut, "Configuration generated in memory only (not persisted)")
 		}
-		output.PrintJson(f.IOStreams.Out, map[string]interface{}{"appId": result.AppID, "appSecret": "****", "brand": result.Brand})
+		printInitOutput(f, opts, existing, opts.ProfileName, result.AppID, secret, result.Brand, opts.Lang)
 		return nil
 	}
 
@@ -349,19 +364,28 @@ func configInitRun(opts *ConfigInitOptions) error {
 
 		if result.AppSecret != "" {
 			// New secret provided (either from "create" or "existing" with input)
-			secret, err := core.ForStorage(result.AppID, core.PlainSecret(result.AppSecret), f.Keychain)
-			if err != nil {
-				return output.Errorf(output.ExitInternal, "internal", "%v", err)
-			}
-			if err := saveInitConfig(opts.ProfileName, existing, f, result.AppID, secret, result.Brand, opts.Lang); err != nil {
-				return output.Errorf(output.ExitInternal, "internal", "failed to save config: %v", err)
-			}
-			if result.Mode == "create" && !opts.NoCredentialFile {
-				if err := persistInitCredentialFile(f, result); err != nil {
-					return output.Errorf(output.ExitInternal, "internal", "failed to save credential file: %v", err)
+			secret := core.PlainSecret(result.AppSecret)
+			if !opts.NoSaveConfig {
+				secret, err = core.ForStorage(result.AppID, core.PlainSecret(result.AppSecret), f.Keychain)
+				if err != nil {
+					return output.Errorf(output.ExitInternal, "internal", "%v", err)
 				}
+				if err := saveInitConfig(opts.ProfileName, existing, f, result.AppID, secret, result.Brand, opts.Lang); err != nil {
+					return output.Errorf(output.ExitInternal, "internal", "failed to save config: %v", err)
+				}
+				if result.Mode == "create" && !opts.NoCredentialFile {
+					if err := persistInitCredentialFile(f, result); err != nil {
+						return output.Errorf(output.ExitInternal, "internal", "failed to save credential file: %v", err)
+					}
+				}
+			} else {
+				output.PrintSuccess(f.IOStreams.ErrOut, "Configuration generated in memory only (not persisted)")
 			}
+			printInitOutput(f, opts, existing, opts.ProfileName, result.AppID, secret, result.Brand, opts.Lang)
 		} else if result.Mode == "existing" && result.AppID != "" {
+			if opts.NoSaveConfig {
+				return output.ErrValidation("--no-save-config requires App Secret input; existing profile secret cannot be exported from keychain")
+			}
 			// Existing app with unchanged secret — update app ID and brand only
 			if err := updateExistingProfileWithoutSecret(existing, opts.ProfileName, result.AppID, result.Brand, opts.Lang); err != nil {
 				var exitErr *output.ExitError
@@ -455,15 +479,75 @@ func configInitRun(opts *ConfigInitOptions) error {
 		return output.ErrValidation("App ID and App Secret cannot be empty")
 	}
 
-	storedSecret, err := core.ForStorage(resolvedAppId, resolvedSecret, f.Keychain)
-	if err != nil {
-		return output.Errorf(output.ExitInternal, "internal", "%v", err)
+	storedSecret := resolvedSecret
+	if !opts.NoSaveConfig {
+		var err error
+		storedSecret, err = core.ForStorage(resolvedAppId, resolvedSecret, f.Keychain)
+		if err != nil {
+			return output.Errorf(output.ExitInternal, "internal", "%v", err)
+		}
+		if err := saveInitConfig(opts.ProfileName, existing, f, resolvedAppId, storedSecret, parseBrand(resolvedBrand), opts.Lang); err != nil {
+			return output.Errorf(output.ExitInternal, "internal", "failed to save config: %v", err)
+		}
+		output.PrintSuccess(f.IOStreams.ErrOut, fmt.Sprintf("Configuration saved to %s", core.GetConfigPath()))
+	} else {
+		if appSecretInput == "" {
+			return output.ErrValidation("--no-save-config requires App Secret input; existing profile secret cannot be exported from keychain")
+		}
+		output.PrintSuccess(f.IOStreams.ErrOut, "Configuration generated in memory only (not persisted)")
 	}
-	if err := saveInitConfig(opts.ProfileName, existing, f, resolvedAppId, storedSecret, parseBrand(resolvedBrand), opts.Lang); err != nil {
-		return output.Errorf(output.ExitInternal, "internal", "failed to save config: %v", err)
-	}
-	output.PrintSuccess(f.IOStreams.ErrOut, fmt.Sprintf("Configuration saved to %s", core.GetConfigPath()))
+	printInitOutput(f, opts, existing, opts.ProfileName, resolvedAppId, storedSecret, parseBrand(resolvedBrand), opts.Lang)
 	return nil
+}
+
+func buildInitConfigPayload(existing *core.MultiAppConfig, profileName, appID string, secret core.SecretInput, brand core.LarkBrand, lang string) *core.MultiAppConfig {
+	var payload *core.MultiAppConfig
+	if existing != nil {
+		copyVal := *existing
+		copyVal.Apps = append([]core.AppConfig(nil), existing.Apps...)
+		payload = &copyVal
+	} else {
+		payload = &core.MultiAppConfig{}
+	}
+
+	app := core.AppConfig{
+		AppId:     appID,
+		AppSecret: secret,
+		Brand:     brand,
+		Lang:      lang,
+		Users:     []core.AppUser{},
+	}
+	if profileName != "" {
+		app.Name = profileName
+	}
+
+	if profileName != "" {
+		if idx := payload.FindAppIndex(profileName); idx >= 0 {
+			payload.Apps[idx] = app
+		} else {
+			payload.Apps = append(payload.Apps, app)
+		}
+		payload.CurrentApp = profileName
+	} else {
+		payload.Apps = []core.AppConfig{app}
+	}
+	return payload
+}
+
+func printInitOutput(
+	f *cmdutil.Factory,
+	opts *ConfigInitOptions,
+	existing *core.MultiAppConfig,
+	appProfile, appID string,
+	secret core.SecretInput,
+	brand core.LarkBrand,
+	lang string,
+) {
+	if opts.NoSaveConfig || opts.EmitConfigJSON {
+		output.PrintJson(f.IOStreams.Out, buildInitConfigPayload(existing, appProfile, appID, secret, brand, lang))
+		return
+	}
+	output.PrintJson(f.IOStreams.Out, map[string]interface{}{"appId": appID, "appSecret": "****", "brand": brand})
 }
 
 func persistInitCredentialFile(f *cmdutil.Factory, result *configInitResult) error {

@@ -9,6 +9,7 @@ import (
 	"errors"
 	"io"
 	"net/http"
+	"os"
 	"sort"
 	"strings"
 	"testing"
@@ -19,6 +20,7 @@ import (
 	"github.com/larksuite/cli/internal/httpmock"
 	"github.com/larksuite/cli/internal/output"
 	"github.com/larksuite/cli/internal/registry"
+	"github.com/larksuite/cli/internal/envvars"
 	"github.com/larksuite/cli/shortcuts/common"
 	"github.com/zalando/go-keyring"
 )
@@ -803,6 +805,111 @@ func TestAuthLoginRun_DeviceCodeUsesCachedRequestedScopes(t *testing.T) {
 	}
 	if got, err := loadLoginRequestedScope("device-code"); err != nil || got != "" {
 		t.Fatalf("loadLoginRequestedScope() after cleanup = (%q, %v), want empty", got, err)
+	}
+}
+
+func TestAuthLoginRun_DeviceCodeInlineCredentialSkipsConfigPersistence(t *testing.T) {
+	keyring.MockInit()
+	setupLoginConfigDir(t)
+
+	f, _, _, reg := cmdutil.TestFactory(t, &core.CliConfig{
+		ProfileName: "",
+		AppID:       "cli_test",
+		AppSecret:   "secret",
+		Brand:       core.BrandFeishu,
+	})
+	f.Invocation.UserCredentialJSON = `{"app_id":"cli_test","app_secret":"secret","brand":"feishu"}`
+
+	reg.Register(&httpmock.Stub{
+		Method: "POST",
+		URL:    larkauth.PathOAuthTokenV2,
+		Body: map[string]interface{}{
+			"access_token":             "user-access-token",
+			"refresh_token":            "refresh-token",
+			"expires_in":               7200,
+			"refresh_token_expires_in": 604800,
+			"scope":                    "im:message:send offline_access",
+		},
+	})
+	reg.Register(&httpmock.Stub{
+		Method: "GET",
+		URL:    larkauth.PathUserInfoV1,
+		Body: map[string]interface{}{
+			"code": 0,
+			"msg":  "ok",
+			"data": map[string]interface{}{
+				"open_id": "ou_user",
+				"name":    "tester",
+			},
+		},
+	})
+
+	err := authLoginRun(&LoginOptions{
+		Factory:    f,
+		Ctx:        context.Background(),
+		DeviceCode: "device-code",
+		JSON:       true,
+	})
+	if err != nil {
+		t.Fatalf("device-code authLoginRun() error = %v", err)
+	}
+
+	if _, err := core.LoadMultiAppConfig(); !errors.Is(err, os.ErrNotExist) {
+		t.Fatalf("expected no config.json persistence in inline credential mode, err=%v", err)
+	}
+}
+
+func TestAuthLoginRun_DeviceCodeEnvCredentialSkipsConfigPersistence(t *testing.T) {
+	keyring.MockInit()
+	setupLoginConfigDir(t)
+	t.Setenv(envvars.CliAppID, "cli_test")
+	t.Setenv(envvars.CliAppSecret, "secret")
+	t.Setenv(envvars.CliBrand, "feishu")
+	t.Setenv(envvars.CliStrictMode, "off")
+
+	f, _, _, reg := cmdutil.TestFactory(t, &core.CliConfig{
+		ProfileName: "",
+		AppID:       "cli_test",
+		AppSecret:   "secret",
+		Brand:       core.BrandFeishu,
+	})
+
+	reg.Register(&httpmock.Stub{
+		Method: "POST",
+		URL:    larkauth.PathOAuthTokenV2,
+		Body: map[string]interface{}{
+			"access_token":             "user-access-token",
+			"refresh_token":            "refresh-token",
+			"expires_in":               7200,
+			"refresh_token_expires_in": 604800,
+			"scope":                    "im:message:send offline_access",
+		},
+	})
+	reg.Register(&httpmock.Stub{
+		Method: "GET",
+		URL:    larkauth.PathUserInfoV1,
+		Body: map[string]interface{}{
+			"code": 0,
+			"msg":  "ok",
+			"data": map[string]interface{}{
+				"open_id": "ou_user",
+				"name":    "tester",
+			},
+		},
+	})
+
+	err := authLoginRun(&LoginOptions{
+		Factory:    f,
+		Ctx:        context.Background(),
+		DeviceCode: "device-code",
+		JSON:       true,
+	})
+	if err != nil {
+		t.Fatalf("device-code authLoginRun() error = %v", err)
+	}
+
+	if _, err := core.LoadMultiAppConfig(); !errors.Is(err, os.ErrNotExist) {
+		t.Fatalf("expected no config.json persistence in env credential mode, err=%v", err)
 	}
 }
 

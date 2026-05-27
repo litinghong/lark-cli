@@ -31,7 +31,7 @@ func TestAuthLoginCmd_FlagParsing(t *testing.T) {
 		gotOpts = opts
 		return nil
 	})
-	cmd.SetArgs([]string{"--scope", "calendar:calendar:read", "--json", "--no-credential-file"})
+	cmd.SetArgs([]string{"--scope", "calendar:calendar:read", "--all", "--json", "--no-credential-file"})
 	err := cmd.Execute()
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
@@ -41,6 +41,9 @@ func TestAuthLoginCmd_FlagParsing(t *testing.T) {
 	}
 	if !gotOpts.JSON {
 		t.Error("expected JSON=true")
+	}
+	if !gotOpts.All {
+		t.Error("expected All=true")
 	}
 	if !gotOpts.NoCredentialFile {
 		t.Error("expected NoCredentialFile=true")

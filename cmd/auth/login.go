@@ -31,6 +31,7 @@ type LoginOptions struct {
 	Ctx              context.Context
 	JSON             bool
 	Scope            string
+	All              bool
 	Recommend        bool
 	Domains          []string
 	Exclude          []string
@@ -67,7 +68,8 @@ browser. Run it in the background and retrieve the verification URL from its out
 	}
 	cmdutil.SetSupportedIdentities(cmd, []string{"user"})
 
-	cmd.Flags().StringVar(&opts.Scope, "scope", "", "scopes to request (space- or comma-separated). Combines additively with --domain/--recommend")
+	cmd.Flags().StringVar(&opts.Scope, "scope", "", "scopes to request (space- or comma-separated). Combines additively with --domain/--all/--recommend")
+	cmd.Flags().BoolVar(&opts.All, "all", false, "request scopes for all known domains (equivalent to --domain all)")
 	cmd.Flags().BoolVar(&opts.Recommend, "recommend", false, "request only recommended (auto-approve) scopes")
 	available := sortedKnownDomains()
 	cmd.Flags().StringSliceVar(&opts.Domains, "domain", nil,
@@ -135,7 +137,10 @@ func authLoginRun(opts *LoginOptions) error {
 		return authLoginPollDeviceCode(opts, config, msg, log)
 	}
 
-	selectedDomains := opts.Domains
+	selectedDomains := append([]string(nil), opts.Domains...)
+	if opts.All {
+		selectedDomains = append(selectedDomains, "all")
+	}
 	scopeLevel := "" // "common" or "all" (from interactive mode)
 
 	// Expand --domain all to all available domains (from_meta projects + shortcut services)
@@ -164,10 +169,10 @@ func authLoginRun(opts *LoginOptions) error {
 		}
 	}
 
-	hasAnyOption := opts.Scope != "" || opts.Recommend || len(selectedDomains) > 0
+	hasAnyOption := opts.Scope != "" || opts.All || opts.Recommend || len(selectedDomains) > 0
 
 	if len(opts.Exclude) > 0 && !hasAnyOption {
-		return output.ErrValidation("--exclude requires --scope, --domain, or --recommend to be specified")
+		return output.ErrValidation("--exclude requires --scope, --domain, --all, or --recommend to be specified")
 	}
 
 	if !hasAnyOption {

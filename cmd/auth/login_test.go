@@ -9,6 +9,7 @@ import (
 	"errors"
 	"io"
 	"net/http"
+	"net/url"
 	"os"
 	"sort"
 	"strings"
@@ -17,10 +18,10 @@ import (
 	larkauth "github.com/larksuite/cli/internal/auth"
 	"github.com/larksuite/cli/internal/cmdutil"
 	"github.com/larksuite/cli/internal/core"
+	"github.com/larksuite/cli/internal/envvars"
 	"github.com/larksuite/cli/internal/httpmock"
 	"github.com/larksuite/cli/internal/output"
 	"github.com/larksuite/cli/internal/registry"
-	"github.com/larksuite/cli/internal/envvars"
 	"github.com/larksuite/cli/shortcuts/common"
 	"github.com/zalando/go-keyring"
 )
@@ -1186,6 +1187,81 @@ func TestCollectScopesForDomains_ExpandsAuthDomainChildren(t *testing.T) {
 	}
 	if !found {
 		t.Error("collectScopesForDomains([docs]) should include whiteboard scopes (board:whiteboard:*)")
+	}
+}
+
+func TestAuthLoginRun_AllRequestsAllKnownDomainScopes(t *testing.T) {
+	setupLoginConfigDir(t)
+	f, _, _, reg := cmdutil.TestFactory(t, &core.CliConfig{
+		ProfileName: "default",
+		AppID:       "cli_test",
+		AppSecret:   "secret",
+		Brand:       core.BrandFeishu,
+	})
+
+	deviceAuthStub := &httpmock.Stub{
+		Method: "POST",
+		URL:    larkauth.PathDeviceAuthorization,
+		Body: map[string]interface{}{
+			"device_code":               "device-code",
+			"user_code":                 "user-code",
+			"verification_uri":          "https://example.com/verify",
+			"verification_uri_complete": "https://example.com/verify?code=123",
+			"expires_in":                240,
+			"interval":                  5,
+		},
+	}
+	reg.Register(deviceAuthStub)
+
+	err := authLoginRun(&LoginOptions{
+		Factory: f,
+		Ctx:     context.Background(),
+		All:     true,
+		NoWait:  true,
+		JSON:    true,
+	})
+	if err != nil {
+		t.Fatalf("authLoginRun() error = %v", err)
+	}
+
+	form, err := url.ParseQuery(string(deviceAuthStub.CapturedBody))
+	if err != nil {
+		t.Fatalf("ParseQuery(captured body) error = %v, body=%q", err, string(deviceAuthStub.CapturedBody))
+	}
+	gotSet := make(map[string]bool)
+	for _, s := range strings.Fields(form.Get("scope")) {
+		gotSet[s] = true
+	}
+	if !gotSet["offline_access"] {
+		t.Fatalf("scope should include offline_access, got %q", form.Get("scope"))
+	}
+	delete(gotSet, "offline_access")
+
+	wantScopes := collectScopesForDomains(sortedKnownDomains(), "user")
+	if len(gotSet) != len(wantScopes) {
+		t.Fatalf("scope size mismatch: got=%d want=%d", len(gotSet), len(wantScopes))
+	}
+	for _, want := range wantScopes {
+		if !gotSet[want] {
+			t.Fatalf("scope set missing %q", want)
+		}
+	}
+}
+
+func TestAuthLoginRun_ExcludeWithoutSelectorsMentionsAll(t *testing.T) {
+	f, _, _, _ := cmdutil.TestFactory(t, &core.CliConfig{
+		AppID: "cli_test", AppSecret: "secret", Brand: core.BrandFeishu,
+	})
+	err := authLoginRun(&LoginOptions{
+		Factory: f,
+		Ctx:     context.Background(),
+		Exclude: []string{"im:message:send"},
+	})
+	if err == nil {
+		t.Fatal("expected validation error")
+	}
+	if !strings.Contains(err.Error(), "--all") {
+		t.Fatalf("error should mention --all, got %v", err)
 	}
 }
 

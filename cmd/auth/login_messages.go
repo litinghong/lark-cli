@@ -72,7 +72,7 @@ var loginMsgZh = &loginMsg{
 
 	HintHeader:  "请指定要授权的权限:\n",
 	HintCommon1: "  --recommend                     授权推荐权限",
-	HintCommon2: "  --domain all                    授权所有已知域的权限",
+	HintCommon2: "  --all                           一次性授权所有已知域的权限",
 	HintCommon3: "  --domain calendar,task          授权日历和任务域的权限",
 	HintCommon4: "  --domain calendar --recommend   授权日历域的推荐权限",
 	HintFooter:  "  lark-cli auth login --help",
@@ -108,7 +108,7 @@ var loginMsgEn = &loginMsg{
 
 	HintHeader:  "Please specify the scopes to authorize:\n",
 	HintCommon1: "  --recommend                     authorize recommended scopes",
-	HintCommon2: "  --domain all                    authorize all known domain scopes",
+	HintCommon2: "  --all                           authorize all known domain scopes in one go",
 	HintCommon3: "  --domain calendar,task          authorize calendar and task scopes",
 	HintCommon4: "  --domain calendar --recommend   authorize calendar recommended scopes",
 	HintFooter:  "  lark-cli auth login --help",

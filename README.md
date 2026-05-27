@@ -84,7 +84,7 @@ npx skills add larksuite/cli -y -g
 # 1. Configure app credentials (one-time, interactive guided setup)
 lark-cli config init
 
-# 2. Log in (--recommend auto-selects commonly used scopes)
+# 2. Log in (--recommend auto-selects commonly used scopes; --all requests all known-domain scopes)
 lark-cli auth login --recommend
 
 # 3. Start using
@@ -188,6 +188,9 @@ lark-cli auth login --domain calendar,task
 
 # Recommended auto-approval scopes
 lark-cli auth login --recommend
+
+# One-shot authorize all known-domain scopes
+lark-cli auth login --all
 
 # Multi-user embedding: skip writing local .lark-cli-credentials.json
 lark-cli auth login --recommend --no-credential-file

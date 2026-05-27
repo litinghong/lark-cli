@@ -84,7 +84,7 @@ npx skills add larksuite/cli -y -g
 # 1. 配置应用凭证（仅需一次，交互式引导完成）
 lark-cli config init
 
-# 2. 登录授权（--recommend 自动选择常用权限）
+# 2. 登录授权（--recommend 自动选择常用权限；--all 一次性申请所有已知域权限）
 lark-cli auth login --recommend
 
 # 3. 开始使用
@@ -188,6 +188,9 @@ lark-cli auth login --domain calendar,task
 
 # 推荐的自动审批 scopes
 lark-cli auth login --recommend
+
+# 一次性申请所有已知域 scopes
+lark-cli auth login --all
 
 # 多用户嵌入场景：跳过本地 .lark-cli-credentials.json 落盘
 lark-cli auth login --recommend --no-credential-file
